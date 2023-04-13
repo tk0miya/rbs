@@ -219,6 +219,7 @@ class EnumerableTest2 < Test::Unit::TestCase
     assert_send_type("() { (String, String) -> String } -> String", TestEnumerable.new, :inject) do |memo, item|
       memo + item
     end
+    assert_send_type "() { (String, String) -> String } -> nil", TestEmptyEnumerable.new, :inject do |x, y| x + y end
   end
 
   def test_first

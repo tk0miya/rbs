@@ -879,7 +879,7 @@ module Enumerable[unchecked out Elem] : _Each[Elem]
   def inject: (untyped init, Symbol method) -> untyped
             | (Symbol method) -> untyped
             | [A] (A initial) { (A, Elem) -> A } -> A
-            | () { (Elem, Elem) -> Elem } -> Elem
+            | () { (Elem, Elem) -> Elem } -> Elem?
 
   # <!--
   #   rdoc-file=enum.c
