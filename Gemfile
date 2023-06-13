@@ -20,6 +20,11 @@ gem 'tempfile'
 gem "prime"
 gem "rdoc", "~> 6.4.0"
 
+# FIXME: Workaround for Parser 3.2.2.2 or lower with Ruby 3.3.0dev.
+# When the Praser gem releases a new version of Racc that includes the runtime dependencies,
+# it will be able to upgrade the Parser gem dependency and remove the workaround.
+gem 'racc', '>= 1.6.2'
+
 # Test gems
 gem "rbs-amber", path: "test/assets/test-gem"
 

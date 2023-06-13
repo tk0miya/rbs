@@ -40,6 +40,7 @@ GEM
     psych (4.0.6)
       stringio
     public_suffix (5.0.1)
+    racc (1.7.0)
     rainbow (3.1.1)
     rake (13.0.6)
     rake-compiler (1.2.2)
@@ -104,6 +105,7 @@ DEPENDENCIES
   json-schema
   minitest
   prime
+  racc (>= 1.6.2)
   rake
   rake-compiler
   rbs!
