@@ -375,6 +375,33 @@ EOF
     end
   end
 
+  def test_build_singleton_module_self_types
+    SignatureManager.new do |manager|
+      manager.files[Pathname("foo.rbs")] = <<EOF
+class StringConvertible
+  def self.to_str: () -> String
+end
+
+module M : StringConvertible
+end
+EOF
+      manager.build do |env|
+        builder = DefinitionBuilder.new(env: env)
+
+        builder.build_singleton(type_name("::M")).yield_self do |definition|
+          assert_instance_of Definition, definition
+
+          assert_equal [:__id__, :initialize, :puts, :respond_to_missing?, :to_i], definition.methods.keys.sort
+          assert_method_definition definition.methods[:__id__], ["() -> ::Integer"]
+          assert_method_definition definition.methods[:initialize], ["() -> void"]
+          assert_method_definition definition.methods[:puts], ["(*untyped) -> nil"]
+          assert_method_definition definition.methods[:respond_to_missing?], ["(::Symbol, bool) -> bool"]
+        end
+      end
+    end
+  end
+
+
   def test_build_instance_class_basic_object
     SignatureManager.new do |manager|
       manager.build do |env|

@@ -110,7 +110,7 @@ module RBS
             type_name: type_name,
             params: nil,
             super_class: super_class,
-            self_types: nil,
+            self_types: [],
             included_modules: nil,
             included_interfaces: nil,
             prepended_modules: nil,
@@ -235,9 +235,7 @@ module RBS
           ancestors = OneAncestors.module_instance(type_name: type_name, params: params)
 
           self_types = ancestors.self_types or raise
-          if entry.self_types.empty?
-            self_types.push Definition::Ancestor::Instance.new(name: BuiltinNames::Object.name, args: [], source: nil)
-          else
+          unless entry.self_types.empty?
             entry.self_types.each do |module_self|
               NoSelfTypeFoundError.check!(module_self, env: env)
 
@@ -302,6 +300,21 @@ module RBS
             type_name: type_name,
             super_class: Definition::Ancestor::Instance.new(name: BuiltinNames::Module.name, args: [], source: :super)
           )
+
+          self_types = ancestors.self_types or raise
+          if entry.self_types.empty?
+            self_types.push Definition::Ancestor::Instance.new(name: BuiltinNames::Object.name, args: [], source: nil)
+          else
+            entry.self_types.each do |module_self|
+              NoSelfTypeFoundError.check!(module_self, env: env)
+
+              module_name = module_self.name
+              if module_name.class?
+                module_name = env.normalize_module_name(module_name)
+              end
+              self_types.push Definition::Ancestor::Instance.new(name: module_name, args: module_self.args, source: module_self)
+            end
+          end
         end
 
         mixin_ancestors(entry,

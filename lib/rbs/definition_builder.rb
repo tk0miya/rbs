@@ -239,6 +239,17 @@ module RBS
             definition.class_variables.merge!(defn.class_variables)
           end
 
+          if entry.is_a?(Environment::ModuleEntry)
+            if self_types = one_ancestors.self_types
+              self_types.each do |self_type|
+                next if self_type.name.interface?
+
+                defn = build_singleton0(self_type.name)
+                definition.methods.merge!(defn.methods) if defn
+              end
+            end
+          end
+
           one_ancestors.each_extended_module do |mod|
             mod.args.each do |arg|
               validate_type_presence(arg)
