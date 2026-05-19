@@ -42,20 +42,29 @@ module RBS
 
     @hash: Integer?
 
-    self.@root: Namespace?
+    # The following ivars are set on interned Namespaces produced through
+    # `Namespace.[]`. Uninterned Namespaces (constructed with `.new`) leave
+    # them as `nil` / `false`.
+    @parent_ns: Namespace?
 
-    self.@empty: Namespace?
+    @last_component: Symbol?
+
+    @children: Hash[Symbol, Namespace]?
+
+    @interned: bool
+
+    @absolute_view: Namespace?
+
+    @relative_view: Namespace?
 
     self.@intern_mutex: Mutex
 
-    # Per-`absolute` flag tries of nested Hashes keyed on path Symbols,
-    # with the cached Namespace stored under the `INTERN_LEAF` sentinel
-    # at each path's terminal node.
-    self.@intern_trie_absolute: Hash[Symbol | Module, untyped]
+    # Trie roots: every interned Namespace _is_ a trie node, reachable from
+    # one of these two roots via its `@parent_ns` chain. The roots are
+    # interned Namespaces themselves (the empty / root namespace).
+    self.@intern_root_absolute: Namespace?
 
-    self.@intern_trie_relative: Hash[Symbol | Module, untyped]
-
-    INTERN_LEAF: Module
+    self.@intern_root_relative: Namespace?
 
     # Returns an interned `Namespace` instance.
     #
