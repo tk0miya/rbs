@@ -46,8 +46,9 @@ class RBS::NamespaceTest < Test::Unit::TestCase
     interned = Namespace[[:Foo, :Bar], true]
     fresh    = Namespace.new(path: [:Foo, :Bar], absolute: true)
 
-    assert_equal interned, fresh
-    assert_equal interned.hash, fresh.hash
+    # `Namespace.new(...)` now flows through the flyweight cache and
+    # returns the canonical instance — there is no uninterned variant.
+    assert_same interned, fresh
   end
 
   def test_empty_and_root_are_interned

@@ -2,32 +2,32 @@
 
 module RBS
   class Namespace
-    # Process-wide flyweight cache. Every interned Namespace is itself a
-    # node in the trie: it carries a direct `@parent_ns` pointer to its
-    # parent namespace, the `@last_component` it was reached by, and a
-    # lazily-allocated `@children` Hash[Symbol, Namespace] of the
-    # namespaces that extend it. The cache therefore needs nothing more
-    # than two roots (one per `absolute` flag); `parent` is an O(1)
-    # pointer dereference and `append` is a single `Hash#[]` lookup.
+    # Process-wide flyweight cache. Every Namespace is itself a node in
+    # the trie: it carries a direct `@parent_ns` pointer to its parent
+    # namespace, the `@last_component` Symbol it was reached by, and a
+    # non-nil `@children` Hash[Symbol, Namespace] of the namespaces that
+    # extend it. The cache therefore needs nothing more than two roots
+    # (one per `absolute` flag); `parent` is an O(1) pointer dereference
+    # and `append` is a single `Hash#[]` lookup.
     @intern_mutex = Mutex.new
     @intern_root_absolute = nil
     @intern_root_relative = nil
 
     class << self
       # Internal: returns the canonical empty Namespace for the given
-      # absoluteness flag. Both roots are themselves interned Namespace
-      # instances; they are the only nodes with `@parent_ns == nil`.
+      # absoluteness flag. Both roots are themselves Namespace instances;
+      # they are the only nodes with `@parent_ns == nil`.
       def _intern_root(absolute)
         if absolute
-          @intern_root_absolute ||= _new_interned(parent_ns: nil, last_component: nil, absolute: true)
+          @intern_root_absolute ||= _new_node(parent_ns: nil, last_component: nil, absolute: true)
         else
-          @intern_root_relative ||= _new_interned(parent_ns: nil, last_component: nil, absolute: false)
+          @intern_root_relative ||= _new_node(parent_ns: nil, last_component: nil, absolute: false)
         end
       end
 
-      def _new_interned(parent_ns:, last_component:, absolute:)
+      def _new_node(parent_ns:, last_component:, absolute:)
         ns = allocate
-        ns.send(:_init_interned, parent_ns: parent_ns, last_component: last_component, absolute: absolute)
+        ns.send(:_init, parent_ns: parent_ns, last_component: last_component, absolute: absolute)
         ns
       end
 
@@ -36,18 +36,24 @@ module RBS
       end
     end
 
-    # Returns a canonical `Namespace` instance for the given `path` /
-    # `absolute` pair. Repeated calls with structurally equal arguments
-    # return the same object, so callers can rely on `equal?` for fast
-    # equality.
+    # `Namespace.new(path:, absolute:)` is retained as an alias for
+    # `Namespace[path, absolute]` so every Namespace flows through the
+    # flyweight cache. Repeated calls with structurally equal arguments
+    # return the very same object.
+    def self.new(path:, absolute:)
+      self[path, absolute]
+    end
+
+    # Returns the canonical Namespace for the given `path` / `absolute`
+    # pair. Callers can rely on `equal?` for fast equality.
     def self.[](path, absolute)
       absolute = absolute ? true : false
       root = _intern_root(absolute)
       return root if path.empty?
 
       # Lock-free fast path: walk the trie reading existing children.
-      # Each interned Namespace owns a non-nil `@children` hash so the
-      # walk is exactly one `Hash#[]` lookup per level.
+      # Each Namespace owns a non-nil `@children` hash so the walk is
+      # exactly one `Hash#[]` lookup per level.
       cur = root
       path.each do |sym|
         child = cur._children[sym]
@@ -77,20 +83,7 @@ module RBS
       _intern_root(true)
     end
 
-    # Public constructor for backwards compatibility. Produces an
-    # uninterned Namespace; structural equality still holds (`==`,
-    # `eql?`, `hash`) so it interoperates with cached entries via Hash /
-    # Set, but `equal?` may differ. Prefer `Namespace.[]` for new code.
-    def initialize(path:, absolute:)
-      @path = path
-      @absolute = absolute ? true : false
-      @parent_ns = nil
-      @last_component = nil
-      @children = nil
-      @interned = false
-    end
-
-    def _init_interned(parent_ns:, last_component:, absolute:)
+    def _init(parent_ns:, last_component:, absolute:)
       @parent_ns = parent_ns
       @last_component = last_component
       @absolute = absolute
@@ -99,51 +92,45 @@ module RBS
       # without an extra nil-check or ivar fetch + branch.
       @children = {}
       @path = nil
-      @interned = true
     end
-    protected :_init_interned
+    protected :_init
 
     # Internal readers used by the trie walk in `Namespace.[]` and by
-    # `path` reification. Non-nil for interned namespaces; on uninterned
-    # ones `_children` returns nil and the other two return nil.
+    # `path` reification.
     def _children;       @children       end
     def _parent_ns;      @parent_ns      end
     def _last_component; @last_component end
 
-    # Returns or creates the interned child for `component`. Caller must
+    # Returns or creates the child Namespace for `component`. Caller must
     # hold the intern mutex.
     def _intern_child(component)
-      @children[component] ||= Namespace._new_interned(
+      @children[component] ||= Namespace._new_node(
         parent_ns: self,
         last_component: component,
         absolute: @absolute,
       )
     end
 
-    # Returns the path as an Array[Symbol]. For interned namespaces the
-    # array is built lazily on first access and frozen; for uninterned
-    # ones it is whatever was passed to `new`.
+    # Returns the path as an Array[Symbol], built lazily on first
+    # access and frozen.
     def path
-      return @path if @path
-      return @path unless @interned
-
-      # Walk up once and reify a frozen Array[Symbol]. The walk is
-      # bounded by the depth, and the result is memoized.
-      depth = 0
-      cur = self
-      while cur._parent_ns
-        depth += 1
-        cur = cur._parent_ns
+      @path ||= begin
+        depth = 0
+        cur = self
+        while cur._parent_ns
+          depth += 1
+          cur = cur._parent_ns
+        end
+        arr = Array.new(depth)
+        cur = self
+        idx = depth - 1
+        while idx >= 0
+          arr[idx] = cur._last_component
+          cur = cur._parent_ns
+          idx -= 1
+        end
+        arr.freeze
       end
-      arr = Array.new(depth)
-      cur = self
-      idx = depth - 1
-      while idx >= 0
-        arr[idx] = cur._last_component
-        cur = cur._parent_ns
-        idx -= 1
-      end
-      @path = arr.freeze
     end
 
     def +(other)
@@ -151,35 +138,34 @@ module RBS
         other
       elsif other.empty?
         self
-      elsif @interned
-        # Walk down the cache from self, one component at a time.
-        other.path.inject(self) { |ns, sym| ns.append(sym) }
       else
-        Namespace[path + other.path, absolute?]
+        # Walk `other` to the root via parent pointers, collecting the
+        # components to append onto `self`. No Array[Symbol] is built
+        # for either side.
+        stack = []
+        o = other
+        while o._parent_ns
+          stack << o._last_component
+          o = o._parent_ns
+        end
+        cur = self
+        while (sym = stack.pop)
+          cur = cur.append(sym)
+        end
+        cur
       end
     end
 
     def append(component)
-      if @interned
-        existing = @children[component]
-        return existing if existing
-        Namespace._intern_mutex.synchronize do
-          _intern_child(component)
-        end
-      else
-        Namespace[path + [component], absolute?]
+      existing = @children[component]
+      return existing if existing
+      Namespace._intern_mutex.synchronize do
+        _intern_child(component)
       end
     end
 
     def parent
-      if @interned
-        @parent_ns or raise "Parent with empty namespace"
-      else
-        @parent ||= begin
-          raise "Parent with empty namespace" if empty?
-          Namespace[path.take(path.size - 1), absolute?]
-        end
-      end
+      @parent_ns or raise "Parent with empty namespace"
     end
 
     def absolute?
@@ -192,61 +178,42 @@ module RBS
 
     def absolute!
       return self if @absolute
-      if @interned
-        @absolute_view ||= begin
-          if @parent_ns
-            @parent_ns.absolute!.append(@last_component)
-          else
-            Namespace.root
-          end
-        end
-      else
-        Namespace[path, true]
-      end
+      @absolute_view ||= if @parent_ns
+                           @parent_ns.absolute!.append(@last_component)
+                         else
+                           Namespace.root
+                         end
     end
 
     def relative!
       return self unless @absolute
-      if @interned
-        @relative_view ||= begin
-          if @parent_ns
-            @parent_ns.relative!.append(@last_component)
-          else
-            Namespace.empty
-          end
-        end
-      else
-        Namespace[path, false]
-      end
+      @relative_view ||= if @parent_ns
+                           @parent_ns.relative!.append(@last_component)
+                         else
+                           Namespace.empty
+                         end
     end
 
     def empty?
-      if @interned
-        @parent_ns.nil?
-      else
-        path.empty?
-      end
+      @parent_ns.nil?
     end
 
     def ==(other)
-      return true if equal?(other)
-      other.is_a?(Namespace) && other.path == path && other.absolute? == absolute?
+      # Every Namespace is interned, so `equal?` and `==` coincide.
+      equal?(other)
     end
 
     alias eql? ==
 
     def hash
-      @hash ||= path.hash ^ absolute?.hash
+      # Object identity hash is fine since interning guarantees
+      # one instance per structural value.
+      __id__
     end
 
     def split
-      if @interned
-        return nil unless @parent_ns
-        [@parent_ns, @last_component]
-      else
-        last = path.last or return
-        [self.parent, last]
-      end
+      return nil unless @parent_ns
+      [@parent_ns, @last_component]
     end
 
     def to_s

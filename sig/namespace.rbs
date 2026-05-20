@@ -32,26 +32,19 @@ module RBS
   # ```
   #
   class Namespace
+    # Lazily reified Array[Symbol] of the path components. Built on first
+    # access by walking parent pointers.
     attr_reader path: Array[Symbol]
-
-    def initialize: (path: Array[Symbol], absolute: boolish) -> void
 
     @absolute: bool
 
-    @parent: Namespace?
-
-    @hash: Integer?
-
-    # The following ivars are set on interned Namespaces produced through
-    # `Namespace.[]`. Uninterned Namespaces (constructed with `.new`) leave
-    # them as `nil` / `false`.
     @parent_ns: Namespace?
 
     @last_component: Symbol?
 
-    @children: Hash[Symbol, Namespace]?
+    @children: Hash[Symbol, Namespace]
 
-    @interned: bool
+    @path: Array[Symbol]?
 
     @absolute_view: Namespace?
 
@@ -59,18 +52,20 @@ module RBS
 
     self.@intern_mutex: Mutex
 
-    # Trie roots: every interned Namespace _is_ a trie node, reachable from
-    # one of these two roots via its `@parent_ns` chain. The roots are
-    # interned Namespaces themselves (the empty / root namespace).
+    # Trie roots: every Namespace _is_ a trie node, reachable from one of
+    # these two roots via its `@parent_ns` chain. The roots are themselves
+    # Namespaces (the empty / root namespace).
     self.@intern_root_absolute: Namespace?
 
     self.@intern_root_relative: Namespace?
 
-    # Returns an interned `Namespace` instance.
-    #
-    # Subsequent calls with structurally equal `path` and `absolute` arguments
-    # return the same object. The internal `path` array is duplicated and
-    # frozen before being cached.
+    # `Namespace.new(path:, absolute:)` is an alias for `Namespace[path,
+    # absolute]` so every Namespace flows through the flyweight cache.
+    def self.new: (path: Array[Symbol], absolute: boolish) -> Namespace
+
+    # Returns the canonical Namespace for the given `path` / `absolute`
+    # pair. Repeated calls with structurally equal arguments return the
+    # very same object, so callers can rely on `equal?` for fast equality.
     def self.[]: (Array[Symbol] path, boolish absolute) -> Namespace
 
     # Returns new _empty_ namespace.

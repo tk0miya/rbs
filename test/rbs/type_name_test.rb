@@ -14,10 +14,12 @@ class RBS::TypeNameTest < Test::Unit::TestCase
   end
 
   def test_intern_normalizes_namespace
+    # `Namespace.new(...)` now flows through the flyweight cache, so a
+    # fresh-looking namespace is already the canonical instance.
     fresh_ns     = Namespace.new(path: [:Foo], absolute: true)
     interned_ns  = Namespace[[:Foo], true]
 
-    refute_same fresh_ns, interned_ns
+    assert_same fresh_ns, interned_ns
 
     type_name = TypeName[fresh_ns, :Bar]
 
