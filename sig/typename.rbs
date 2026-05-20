@@ -19,28 +19,21 @@ module RBS
     # Kind of the type.
     attr_reader kind: kind
 
-    # Initializer accepts two keyword args, `namespace` and `name`.
-    # Note that `kind` is automatically determined from its `name`.
-    #
-    # If the name starts with capital alphabet, it is _class_.
-    # If the name starts with lower case alphabet, it is _alias_.
-    # If the name starts with an underscore, it is _interface_.
-    #
-    def initialize: (namespace: Namespace, name: Symbol) -> void
-
-    @hash: Integer?
+    # `TypeName.new(namespace:, name:)` is an alias for `TypeName[namespace,
+    # name]` so every TypeName flows through the flyweight cache. The kind
+    # is determined automatically from the first byte of `name`.
+    def self.new: (namespace: Namespace, name: Symbol) -> TypeName
 
     self.@intern_mutex: Mutex
 
-    # Two-level Hash keyed by canonical Namespace identity (outer uses
-    # `compare_by_identity`) and name Symbol.
+    # Two-level Hash keyed by Namespace identity (outer uses
+    # `compare_by_identity`) and name Symbol. The outer keys are already
+    # canonical Namespaces.
     self.@intern_cache: Hash[Namespace, Hash[Symbol, TypeName]]
 
-    # Returns an interned `TypeName` instance.
-    #
-    # The given `namespace` is canonicalized so cached instances always hold an
-    # interned namespace. Subsequent calls with structurally equal arguments
-    # return the same object.
+    # Returns the canonical `TypeName` instance for the given namespace /
+    # name pair. Subsequent calls with structurally equal arguments return
+    # the very same object, so callers can rely on `equal?`.
     def self.[]: (Namespace namespace, Symbol name) -> TypeName
 
     def ==: (untyped other) -> bool

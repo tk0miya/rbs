@@ -6,56 +6,79 @@ module RBS
     attr_reader :name
     attr_reader :kind
 
-    def initialize(namespace:, name:)
-      @namespace = namespace
-      @name = name
-      @kind = case
-              when name.match?(/\A[A-Z]/)
-                :class
-              when name.match?(/\A[a-z]/)
-                :alias
-              when name.start_with?("_")
-                :interface
-              else
-                # Defaults to :class
-                :class
-              end
-    end
-
-    # Process-wide flyweight cache. Two-level Hash keyed by canonical
-    # Namespace identity (outer uses `compare_by_identity`) and name
-    # Symbol.
+    # Process-wide flyweight cache. Two-level Hash keyed by Namespace
+    # identity (outer uses `compare_by_identity`) and name Symbol. Every
+    # Namespace is already canonical so the outer key needs no
+    # normalization step.
     @intern_mutex = Mutex.new
     @intern_cache = {}  #: Hash[Namespace, Hash[Symbol, TypeName]]
     @intern_cache.compare_by_identity
 
-    # Returns a canonical `TypeName` instance for the given `namespace` /
-    # `name` pair. The namespace is canonicalized through `Namespace.[]`
-    # so identity-based lookup works regardless of the caller passing a
-    # fresh `Namespace.new` or an already-interned instance.
-    def self.[](namespace, name)
-      ns = Namespace[namespace.path, namespace.absolute?]
+    class << self
+      def _intern_mutex
+        @intern_mutex
+      end
 
-      inner = @intern_cache[ns]
+      def _intern_cache
+        @intern_cache
+      end
+    end
+
+    # `TypeName.new(namespace:, name:)` is retained as an alias for
+    # `TypeName[namespace, name]` so every TypeName flows through the
+    # flyweight cache. Repeated calls with structurally equal arguments
+    # return the very same object.
+    def self.new(namespace:, name:)
+      self[namespace, name]
+    end
+
+    # Returns the canonical TypeName for the given `namespace` / `name`
+    # pair. Callers can rely on `equal?` for fast equality.
+    def self.[](namespace, name)
+      inner = @intern_cache[namespace]
       if inner && (cached = inner[name])
         return cached
       end
 
       @intern_mutex.synchronize do
-        inner = (@intern_cache[ns] ||= {})
-        inner[name] ||= new(namespace: ns, name: name)
+        inner = (@intern_cache[namespace] ||= {})
+        inner[name] ||= begin
+          tn = allocate
+          tn.send(:_init, namespace: namespace, name: name)
+          tn
+        end
       end
     end
 
+    def _init(namespace:, name:)
+      @namespace = namespace
+      @name = name
+      # Kind is determined by the first byte of the name without
+      # constructing a regex match object.
+      first = name.length > 0 ? name.to_s.getbyte(0) : nil
+      @kind = if first.nil?
+                :class
+              elsif first == 0x5F                # '_'
+                :interface
+              elsif first >= 0x61 && first <= 0x7A # 'a'..'z'
+                :alias
+              else
+                :class
+              end
+    end
+    protected :_init
+
     def ==(other)
-      return true if equal?(other)
-      other.is_a?(self.class) && other.namespace == namespace && other.name == name
+      # Every TypeName is interned, so `equal?` and `==` coincide.
+      equal?(other)
     end
 
     alias eql? ==
 
     def hash
-      @hash ||= namespace.hash ^ name.hash
+      # Object identity hash is fine since interning guarantees one
+      # instance per structural value.
+      __id__
     end
 
     def to_s

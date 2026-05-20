@@ -139,20 +139,10 @@ module RBS
       elsif other.empty?
         self
       else
-        # Walk `other` to the root via parent pointers, collecting the
-        # components to append onto `self`. No Array[Symbol] is built
-        # for either side.
-        stack = []
-        o = other
-        while o._parent_ns
-          stack << o._last_component
-          o = o._parent_ns
-        end
-        cur = self
-        while (sym = stack.pop)
-          cur = cur.append(sym)
-        end
-        cur
+        # Recursive form: `self + other` = (`self + other.parent`).append(last).
+        # No Array[Symbol] is built; `+` results may also be reached
+        # through the cache by future calls.
+        (self + other._parent_ns).append(other._last_component)
       end
     end
 

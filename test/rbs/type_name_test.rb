@@ -37,11 +37,12 @@ class RBS::TypeNameTest < Test::Unit::TestCase
   def test_intern_equals_uninterned_new
     ns = Namespace.new(path: [:Foo], absolute: true)
 
+    # `TypeName.new(...)` now flows through the flyweight cache and
+    # returns the canonical instance.
     interned = TypeName[ns, :Bar]
     fresh    = TypeName.new(namespace: ns, name: :Bar)
 
-    assert_equal interned, fresh
-    assert_equal interned.hash, fresh.hash
+    assert_same interned, fresh
   end
 
   def test_intern_preserves_kind_detection
