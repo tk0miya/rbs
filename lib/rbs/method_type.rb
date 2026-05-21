@@ -63,10 +63,13 @@ module RBS
     end
 
     def map_type(&block)
+      new_type = type.map_type(&block)
+      new_block = self.block&.map_type(&block)
+      return self if new_type.equal?(type) && new_block.equal?(self.block)
       self.class.new(
         type_params: type_params,
-        type: type.map_type(&block),
-        block: self.block&.map_type(&block),
+        type: new_type,
+        block: new_block,
         location: location
       )
     end
