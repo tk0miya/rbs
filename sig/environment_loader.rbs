@@ -97,7 +97,7 @@ module RBS
     #
     # Returns an array of tuples of the declaration, path to the file, and the source.
     #
-    def load: (env: Environment) -> Array[[AST::Declarations::t, Pathname, source]]
+    def load: (env: Environment, ?resolve: bool) -> Array[[AST::Declarations::t, Pathname, source]]
 
     # Returns a pair of spec and path for a gem with RBS.
     # Returns nil if the gem is not installed, or the gem doesn't provide RBS.

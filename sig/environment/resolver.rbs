@@ -1,0 +1,46 @@
+module RBS
+  class Environment
+    # Resolves type names in an `Environment` and produces a new `Environment` with
+    # absolute type names.
+    #
+    class Resolver
+      attr_reader env: Environment
+
+      def initialize: (Environment) -> void
+
+      # Resolves all type names in the environment and returns a new `Environment`.
+      #
+      # When `only` is given, only the declarations contained in the set are resolved.
+      #
+      def call: (?only: Set[AST::Declarations::t | AST::Ruby::Declarations::t]?) -> Environment
+
+      def resolve_signature: (
+        RBS::Resolver::TypeNameResolver,
+        UseMap::Table,
+        Array[AST::Directives::t],
+        Array[AST::Declarations::t],
+        ?only: Set[AST::Declarations::t | AST::Ruby::Declarations::t]?
+      ) -> [Array[AST::Directives::t], Array[AST::Declarations::t]]
+
+      private
+
+      def append_context: (RBS::Resolver::context, Environment::module_decl) -> RBS::Resolver::context
+
+      def resolve_declaration: (RBS::Resolver::TypeNameResolver resolver, UseMap map, AST::Declarations::t decl, context: RBS::Resolver::context, prefix: Namespace) -> AST::Declarations::t
+
+      def resolve_member: (RBS::Resolver::TypeNameResolver, UseMap map, AST::Members::t, context: RBS::Resolver::context) -> AST::Members::t
+
+      def resolve_method_type: (RBS::Resolver::TypeNameResolver, UseMap map, RBS::MethodType, context: RBS::Resolver::context) -> RBS::MethodType
+
+      def resolve_type_params: (RBS::Resolver::TypeNameResolver resolver, UseMap map, Array[AST::TypeParam], context: RBS::Resolver::context) -> Array[AST::TypeParam]
+
+      def resolve_ruby_decl: (RBS::Resolver::TypeNameResolver, AST::Ruby::Declarations::t, context: RBS::Resolver::context, prefix: Namespace) -> AST::Ruby::Declarations::t
+
+      def resolve_ruby_member: (RBS::Resolver::TypeNameResolver, AST::Ruby::Members::t, context: RBS::Resolver::context) -> AST::Ruby::Members::t
+
+      def absolute_type: (RBS::Resolver::TypeNameResolver, UseMap? map, Types::t, context: RBS::Resolver::context) -> Types::t
+
+      def absolute_type_name: (RBS::Resolver::TypeNameResolver, UseMap? map, TypeName, context: RBS::Resolver::context) -> TypeName
+    end
+  end
+end

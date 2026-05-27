@@ -103,7 +103,7 @@ module RBS
       end
     end
 
-    def load(env:)
+    def load(env:, resolve: false)
       # @type var loaded: Array[[AST::Declarations::t, Pathname, source]]
       loaded = []
 
@@ -117,6 +117,10 @@ module RBS
           loaded << [decl, path, source]
         end
         env.add_source(Source::RBS.new(buffer, dirs, decls))
+      end
+
+      if resolve
+        env.replace_contents_from(Environment::Resolver.new(env).call)
       end
 
       loaded

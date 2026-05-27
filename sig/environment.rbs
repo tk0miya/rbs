@@ -58,9 +58,13 @@ module RBS
 
     def initialize_copy: (Environment) -> void
 
+    # Replace the contents of `self` with those of `other`.
+    #
+    def replace_contents_from: (Environment) -> self
+
     # Construct an environment from EnvironmentLoader
     #
-    def self.from_loader: (EnvironmentLoader) -> Environment
+    def self.from_loader: (EnvironmentLoader, ?resolve: bool) -> Environment
 
     def add_source: (Source::t) -> void
 
@@ -85,14 +89,6 @@ module RBS
     # This helps running resolution faster in the case of _partial updates_.
     #
     def resolve_type_names: (?only: Set[AST::Declarations::t | AST::Ruby::Declarations::t]?) -> Environment
-
-    def resolve_signature: (
-      Resolver::TypeNameResolver,
-      UseMap::Table,
-      Array[AST::Directives::t],
-      Array[AST::Declarations::t],
-      ?only: Set[AST::Declarations::t | AST::Ruby::Declarations::t]?
-    ) -> [Array[AST::Directives::t], Array[AST::Declarations::t]]
 
     def inspect: () -> String
 
@@ -258,29 +254,5 @@ module RBS
 
     # Runs generics type params validation over each class definitions
     def validate_type_params: () -> void
-
-    private
-
-    # Returns a context for inside given decls
-    #
-    def resolver_context: (*module_decl) -> Resolver::context
-
-    def append_context: (Resolver::context, module_decl) -> Resolver::context
-
-    def resolve_declaration: (Resolver::TypeNameResolver resolver, UseMap map, AST::Declarations::t decl, context: Resolver::context, prefix: Namespace) -> AST::Declarations::t
-
-    def resolve_member: (Resolver::TypeNameResolver, UseMap map, AST::Members::t, context: Resolver::context) -> AST::Members::t
-
-    def resolve_method_type: (Resolver::TypeNameResolver, UseMap map, RBS::MethodType, context: Resolver::context) -> RBS::MethodType
-
-    def resolve_type_params: (Resolver::TypeNameResolver resolver, UseMap map, Array[AST::TypeParam], context: Resolver::context) ->  Array[AST::TypeParam]
-
-    def resolve_ruby_decl: (Resolver::TypeNameResolver, AST::Ruby::Declarations::t, context: Resolver::context, prefix: Namespace) -> AST::Ruby::Declarations::t
-
-    def resolve_ruby_member: (Resolver::TypeNameResolver, AST::Ruby::Members::t, context: Resolver::context) -> AST::Ruby::Members::t
-
-    def absolute_type: (Resolver::TypeNameResolver, UseMap? map, Types::t, context: Resolver::context) -> Types::t
-
-    def absolute_type_name: (Resolver::TypeNameResolver, UseMap? map, TypeName, context: Resolver::context) -> TypeName
   end
 end
