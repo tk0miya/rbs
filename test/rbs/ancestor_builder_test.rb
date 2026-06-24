@@ -1334,4 +1334,181 @@ end
       end
     end
   end
+
+  # Builds an env from a single signature string.
+  def build_env(sig)
+    Dir.mktmpdir do |dir|
+      path = Pathname(dir)
+      (path + "a.rbs").write(sig)
+      loader = RBS::EnvironmentLoader.new(core_root: RBS::EnvironmentLoader::DEFAULT_CORE_ROOT)
+      loader.add(path: path)
+      env = Environment.from_loader(loader).resolve_type_names
+      yield env
+    end
+  end
+
+  # Serializes a builder's full ancestor caches into a location-free, comparable form.
+  def ancestors_snapshot(builder, env)
+    snapshot = {}
+    serialize = ->(ancestors) do
+      ancestors&.ancestors&.map {|a| [a.class.name, a.name.to_s, (a.respond_to?(:args) ? a.args.map(&:to_s) : nil)] }
+    end
+    env.class_decls.each_key do |name|
+      builder.instance_ancestors(name) rescue next
+      builder.singleton_ancestors(name) rescue nil
+      snapshot[[:instance, name]] = serialize.call(builder.instance_ancestors_cache[name])
+      snapshot[[:singleton, name]] = serialize.call(builder.singleton_ancestors_cache[name])
+    end
+    env.interface_decls.each_key do |name|
+      builder.interface_ancestors(name) rescue next
+      snapshot[[:interface, name]] = serialize.call(builder.interface_ancestors_cache[name])
+    end
+    snapshot
+  end
+
+  # Asserts that an incremental update produces the same ancestors as a from-scratch build.
+  def assert_incremental_matches(old_sig, new_sig)
+    build_env(old_sig) do |old_env|
+      build_env(new_sig) do |new_env|
+        old_builder = DefinitionBuilder::AncestorBuilder.new(env: old_env)
+        ancestors_snapshot(old_builder, old_env) # warm the caches
+
+        except = old_builder.changed_type_names(new_env)
+        incremental = old_builder.update(env: new_env)
+
+        reference = DefinitionBuilder::AncestorBuilder.new(env: new_env)
+
+        assert_equal ancestors_snapshot(reference, new_env),
+                     ancestors_snapshot(incremental, new_env)
+
+        return except
+      end
+    end
+  end
+
+  def test_changed_type_names_detects_local_and_no_change
+    old_sig = <<~EOF
+      class A
+      end
+
+      class B < A
+      end
+    EOF
+
+    # Adding a method does not change the ancestor surface: nothing is invalidated.
+    except = assert_incremental_matches(old_sig, <<~EOF)
+      class A
+        def foo: () -> void
+      end
+
+      class B < A
+      end
+    EOF
+    assert_empty except
+
+    # Adding an include to A invalidates A and its descendant B.
+    except = assert_incremental_matches(<<~OLD, <<~NEW)
+      module M
+      end
+
+      class A
+      end
+
+      class B < A
+      end
+    OLD
+      module M
+      end
+
+      class A
+        include M
+      end
+
+      class B < A
+      end
+    NEW
+    assert_includes except, type_name("::A")
+    assert_includes except, type_name("::B")
+  end
+
+  def test_changed_type_names_handles_referenced_arity_change
+    # GenUser's own text is unchanged, but the arity of the module it includes changes,
+    # so its resolved ancestors differ. The detector must invalidate GenUser too.
+    except = assert_incremental_matches(<<~OLD, <<~NEW)
+      module Gen[T]
+      end
+
+      class GenUser
+        include Gen[String]
+      end
+    OLD
+      module Gen[T, U = Integer]
+      end
+
+      class GenUser
+        include Gen[String]
+      end
+    NEW
+    assert_includes except, type_name("::Gen")
+    assert_includes except, type_name("::GenUser")
+  end
+
+  def test_update_handles_removed_type
+    old_sig = <<~EOF
+      class Gone
+        include Comparable
+      end
+
+      class Keep
+      end
+    EOF
+
+    new_sig = <<~EOF
+      class Keep
+      end
+    EOF
+
+    build_env(old_sig) do |old_env|
+      build_env(new_sig) do |new_env|
+        old_builder = DefinitionBuilder::AncestorBuilder.new(env: old_env)
+        ancestors_snapshot(old_builder, old_env) # warm the caches, including ::Gone
+
+        # The detector flags the removed type.
+        except = old_builder.changed_type_names(new_env)
+        assert_includes except, type_name("::Gone")
+
+        updated = old_builder.update(env: new_env)
+
+        # The removed type leaves no stale cache entry behind: resolving it through the
+        # updated builder fails instead of returning the ancestors cached from the old env.
+        assert_raises(RuntimeError) { updated.instance_ancestors(type_name("::Gone")) }
+
+        # The surviving type still matches a from-scratch build.
+        reference = DefinitionBuilder::AncestorBuilder.new(env: new_env)
+        assert_equal ancestors_snapshot(reference, new_env),
+                     ancestors_snapshot(updated, new_env)
+      end
+    end
+  end
+
+  def test_update_from_empty_cache_matches_fresh_build
+    sig = <<~EOF
+      class A
+      end
+
+      class B < A
+      end
+    EOF
+
+    build_env(sig) do |env|
+      # A builder with no cached ancestors has nothing to reuse, so #update starts empty and the
+      # ancestors built afterwards match a from-scratch build.
+      cold = DefinitionBuilder::AncestorBuilder.new(env: env)
+      updated = cold.update(env: env)
+
+      reference = DefinitionBuilder::AncestorBuilder.new(env: env)
+      assert_equal ancestors_snapshot(reference, env),
+                   ancestors_snapshot(updated, env)
+    end
+  end
 end

@@ -122,6 +122,20 @@ module RBS
 
       def initialize: (env: Environment) -> void
 
+      # Returns a new AncestorBuilder for `env`, reusing this builder's cached ancestors where they
+      # cannot have changed.
+      #
+      # When this builder has cached ancestors they are carried over except for the type names whose
+      # ancestors may have changed (see #changed_type_names); those are dropped so they are rebuilt
+      # lazily.  When this builder has no cached ancestors, the new builder starts empty.
+      #
+      def update: (env: Environment) -> AncestorBuilder
+
+      # Returns the set of type names whose ancestors may differ between the current `env` and
+      # `new_env`.  #update uses this to decide which cached ancestors to drop.
+      #
+      def changed_type_names: (Environment new_env) -> Set[TypeName]
+
       def instance_ancestors: (TypeName, ?building_ancestors: Array[Definition::Ancestor::t]) -> Definition::InstanceAncestors
 
       def singleton_ancestors: (TypeName, ?building_ancestors: Array[Definition::Ancestor::t]) -> Definition::SingletonAncestors
@@ -158,6 +172,20 @@ module RBS
       # Fill `#source` of instance ancestor if `ancestor.name == name` and its `source` is `nil`
       #
       def fill_ancestor_source: (Definition::Ancestor::t, name: TypeName, source: Definition::Ancestor::Instance::source)  -> Definition::Ancestor::t
+
+      # Returns a Hash from a type name to a location-free representation of its _ancestor surface_.
+      #
+      def ancestor_surfaces: (Environment) -> Hash[TypeName, untyped]
+
+      def decl_ancestor_surface: (untyped decl) -> untyped
+
+      # Returns the alias names whose target differs between the two environments.
+      #
+      def changed_alias_names: (Environment old_env, Environment new_env) -> Array[TypeName]
+
+      # Returns a Hash from a referenced type name to the type names referring to it in ancestor position.
+      #
+      def ancestor_reference_index: (Environment) -> Hash[TypeName, Array[TypeName]]
     end
   end
 end

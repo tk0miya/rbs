@@ -172,6 +172,81 @@ module RBS
         @interface_ancestors_cache = {}
       end
 
+      # Returns a new AncestorBuilder for `env`, reusing this builder's cached ancestors where they
+      # cannot have changed.
+      #
+      # When this builder has cached ancestors, they are carried over to the new builder except for
+      # the type names whose ancestors may have changed (computed by {#changed_type_names}); those are
+      # dropped so they are rebuilt lazily against `env`.  When this builder has no cached ancestors,
+      # the new builder simply starts empty.  The caller decides what to (re)build afterwards.
+      #
+      def update(env:)
+        AncestorBuilder.new(env: env).tap do |copy|
+          # Nothing to reuse: leave the new builder empty so everything is built on demand.
+          next if one_instance_ancestors_cache.empty?
+
+          copy.one_instance_ancestors_cache.merge!(one_instance_ancestors_cache)
+          copy.instance_ancestors_cache.merge!(instance_ancestors_cache)
+          copy.one_singleton_ancestors_cache.merge!(one_singleton_ancestors_cache)
+          copy.singleton_ancestors_cache.merge!(singleton_ancestors_cache)
+          copy.one_interface_ancestors_cache.merge!(one_interface_ancestors_cache)
+          copy.interface_ancestors_cache.merge!(interface_ancestors_cache)
+
+          changed_type_names(env).each do |type_name|
+            copy.one_instance_ancestors_cache.delete(type_name)
+            copy.instance_ancestors_cache.delete(type_name)
+            copy.one_singleton_ancestors_cache.delete(type_name)
+            copy.singleton_ancestors_cache.delete(type_name)
+            copy.one_interface_ancestors_cache.delete(type_name)
+            copy.interface_ancestors_cache.delete(type_name)
+          end
+        end
+      end
+
+      # Returns the set of type names whose ancestors may differ between the current `env` and
+      # `new_env`.  {#update} uses this to decide which cached ancestors to drop.
+      #
+      # The set is computed without resolving the whole ancestor chains:
+      #
+      # 1. Compare the _ancestor surface_ (super class, mixins, self types and type params) of each
+      #    type's declarations.  The type names whose surface differs, are added, or are removed form
+      #    the seed set.
+      # 2. When a module/class alias's target changes, the type names referring to the alias are added
+      #    to the seed, since their normalization result changes.
+      # 3. Expand the seed with the descendants in the *current* ancestor graph, because the resolved
+      #    ancestors of a type embed the ancestors of its super class and mixins.
+      #
+      def changed_type_names(new_env)
+        old_surface = ancestor_surfaces(env)
+        new_surface = ancestor_surfaces(new_env)
+
+        seed = Set[] #: Set[TypeName]
+        (old_surface.keys | new_surface.keys).each do |type_name|
+          seed << type_name if old_surface[type_name] != new_surface[type_name]
+        end
+
+        changed_aliases = changed_alias_names(env, new_env)
+        unless changed_aliases.empty?
+          referrers = ancestor_reference_index(env)
+          changed_aliases.each do |alias_name|
+            seed << alias_name
+            referrers[alias_name]&.each {|referrer| seed << referrer }
+          end
+        end
+
+        graph = AncestorGraph.new(env: env, ancestor_builder: self)
+        changed = Set[] #: Set[TypeName]
+        seed.each do |type_name|
+          changed << type_name
+          [AncestorGraph::InstanceNode, AncestorGraph::SingletonNode].each do |node_class|
+            node = node_class.new(type_name: type_name)
+            next unless graph.parents.key?(node) || graph.children.key?(node)
+            graph.each_descendant(node) {|descendant| changed << descendant.type_name }
+          end
+        end
+        changed
+      end
+
       def validate_super_class!(type_name, entry)
         with_super_classes = entry.each_decl.select {|decl| decl.super_class }
 
@@ -672,6 +747,93 @@ module RBS
         else
           ancestor
         end
+      end
+
+      # Returns a Hash from a type name to a (location-free) representation of its _ancestor surface_:
+      # the super class, mixins, self types and type params that {#one_instance_ancestors} and friends
+      # read from the type's own declarations.  Two surfaces are compared with `#==`, which ignores
+      # locations, so an edit that does not touch the ancestor surface produces an equal value.
+      #
+      def ancestor_surfaces(target_env)
+        surfaces = {} #: Hash[TypeName, untyped]
+
+        target_env.class_decls.each do |type_name, entry|
+          surfaces[type_name] = entry.each_decl.map {|decl| decl_ancestor_surface(decl) }
+        end
+        target_env.interface_decls.each do |type_name, entry|
+          surfaces[type_name] = [decl_ancestor_surface(entry.decl)]
+        end
+
+        surfaces
+      end
+
+      def decl_ancestor_surface(decl)
+        type_params = decl.type_params.map {|param| [param.name, param.default_type] }
+
+        super_class =
+          case decl
+          when AST::Declarations::Class
+            decl.super_class&.then {|s| [s.name, s.args] }
+          when AST::Ruby::Declarations::ClassDecl
+            decl.super_class&.then {|s| [s.name, []] }
+          end
+
+        mixins = [] #: Array[untyped]
+        self_types = [] #: Array[untyped]
+
+        case decl
+        when AST::Declarations::Base
+          decl.each_mixin do |member|
+            mixins << [member.class, member.name, member.args]
+          end
+        when AST::Ruby::Declarations::Base
+          decl.members.each do |member|
+            case member
+            when AST::Ruby::Members::IncludeMember, AST::Ruby::Members::ExtendMember, AST::Ruby::Members::PrependMember
+              mixins << [member.class, member.module_name, member.type_args]
+            end
+          end
+        end
+
+        if decl.respond_to?(:self_types) && (types = decl.self_types)
+          self_types = types.map {|type| [type.name, type.args] }
+        end
+
+        [type_params, super_class, mixins, self_types]
+      end
+
+      # Returns the alias names whose target (old name) differs between the two environments.
+      #
+      def changed_alias_names(old_env, new_env)
+        old_aliases = old_env.class_alias_decls
+        new_aliases = new_env.class_alias_decls
+
+        (old_aliases.keys | new_aliases.keys).select do |name|
+          old_aliases[name]&.decl&.old_name != new_aliases[name]&.decl&.old_name
+        end
+      end
+
+      # Returns a Hash from a referenced type name (as written in the declarations, before
+      # normalization) to the type names that refer to it in ancestor position.
+      #
+      def ancestor_reference_index(target_env)
+        index = Hash.new {|hash, key| hash[key] = [] } #: Hash[TypeName, Array[TypeName]]
+
+        register = ->(referrer, decl) do
+          _, super_class, mixins, self_types = decl_ancestor_surface(decl)
+          index[super_class[0]] << referrer if super_class
+          mixins.each {|mixin| index[mixin[1]] << referrer }
+          self_types.each {|self_type| index[self_type[0]] << referrer }
+        end
+
+        target_env.class_decls.each do |_, entry|
+          entry.each_decl {|decl| register.call(entry.name, decl) }
+        end
+        target_env.interface_decls.each do |_, entry|
+          register.call(entry.name, entry.decl)
+        end
+
+        index
       end
     end
   end
